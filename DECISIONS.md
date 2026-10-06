@@ -1,0 +1,25 @@
+# Decisions log
+
+Format: ID - decision - why - status. Deviations from `JARVIS_ARCHITECTURE.md` are marked **DEVIATION**.
+
+- D-01 OSAL package is `jarvis/osal/`, never `platform` (shadows the stdlib module). Enforced by `test_no_directory_named_platform`.
+- D-02 The Native Brain is a deterministic control plane (router, templates, composer, recovery), not a language model. `NativeLiteReasoner` refuses to generate text. Unknown requests => UNSUPPORTED, never a web/Wikipedia guess.
+- D-03 **DEVIATION** Tools are finer-grained than the doc (`system.memory`, `system.disk`, `system.hostname`, `system.info` instead of `system.cpu_mem_disk`). Reason: per-tool policy scopes and genuine parallelism for the "CPU, RAM, disk, network" scenario.
+- D-04 **DEVIATION** Model gateway + Ollama + OpenAI-compatible adapters exist in M1 (architecture: M2). Verified only against local stub servers. No real model has been exercised.
+- D-05 (SUPERSEDED by D-17) Windows pipe name used the user *name*.
+- D-06 IPC uses stdlib `multiprocessing.connection` with an authkey (HMAC challenge) and JSON frames via `send_bytes`/`recv_bytes`; never `send()`/`recv()` (pickle). Zero new dependencies. The stdlib authkey handshake blocked the accept thread; SUPERSEDED by D-18 (transport still stdlib, handshake is ours).
+- D-07 `ToolRegistry.query(intent, platform, granted_perms, limit)` takes granted permissions, not a mode: modes and grants belong to policy, and registry must not import policy.
+- D-08 Approvals over IPC are fail-closed (timeout, disconnect, no callback => declined) and only the session that owns the task may answer. `--yes` auto-answers ASK prompts only; DENY is decided before any prompt exists, so no client flag can reach it.
+- D-09 Policy is deny-list + read-only allow-list for terminals. The allow-list is the boundary; the deny-list (now including PowerShell cmdlets) is defence in depth. A crashing or non-deciding policy engine => POLICY_DENIED, nothing runs.
+- D-10 Audit chain head is read inside `BEGIN IMMEDIATE` on every append (multi-process safe). Cost: one extra SELECT per append.
+- D-11 `system.service_status` returns `unknown` honestly when no service manager answers; the step then FAILS (tool_verified postcondition) instead of guessing "stopped".
+- D-12 `fs.read` results are UNTRUSTED taint; LOW-risk tools may not have write/egress/UI side effects except `notes.write` (confined, create-exclusive).
+- D-13 Test runner is stdlib unittest + tag harness because pytest/ruff/mypy/import-linter cannot be installed here. CI runs the same runner. The AST architecture test is the executed gate; `.importlinter` is an unexecuted cross-check.
+- D-14 Section-27 Task fields (`parent_id`, `priority`, `kind`, `budget`, `taint_set`) are intentionally NOT added in M1: nothing would enforce them. Add with the component that does (M4 planner/scheduler).
+- D-15 Empty placeholder packages (automation, integrations, knowledge, memory, remote, ui, vision, voice) were deleted. Each is created in the milestone that implements it.
+- D-16 Native packaging (.exe / `/opt` launcher) is M3 per the architecture roadmap; M1 ships console scripts `jarvis`, `jarvisd` and `main.py` only. The user's .exe/Linux-launcher requirement is therefore **not yet met**; it is scheduled, not forgotten.
+- D-17 Windows pipe is named `\\.\pipe\jarvisd-<SID>[-disc]` and created by our own `SecurePipeListener` (the stdlib `PipeListener` passes NULL SECURITY_ATTRIBUTES, i.e. the default DACL). Owner-only protected DACL `D:P(A;;GA;;;<SID>)`, FILE_FLAG_FIRST_PIPE_INSTANCE (anti-squat), PIPE_REJECT_REMOTE_CLIENTS. Token file and run dir get an owner-only DACL BEFORE the secret is written. SYSTEM/Administrators are deliberately not listed (documented: not a defence against a compromised administrator). Status: IMPLEMENTED, NOT VERIFIED on Windows.
+- D-18 IPC authentication is our own mutual HMAC-SHA256 challenge-response (`ipc/handshake.py`, role-labelled to prevent reflection, 128-byte cap, deadline via `poll`). It runs on a per-connection admission thread so a stalled client cannot block `accept()`; pending handshakes are capped (excess is shed and audited at <=1/s). The client also authenticates the server.
+- D-19 Peer identity is fail-closed: `ipc.require_peer_identity=true` (default) refuses a connection whose peer user cannot be determined. Linux: SO_PEERCRED. Windows: GetNamedPipeClientProcessId -> OpenProcess -> TokenUser SID == own SID. Residual: PID reuse window (tiny), unverified on Windows.
+- D-20 Test skips must carry an explicit reason (`linux_only("...")`/`windows_only("...")`); `tests.run` fails if any skip has none. Doubles that stand in for Win32 are tagged FAKE_WINAPI and are never counted as Windows evidence.
+- D-21 Tooling config is non-strict (ruff E,F,B,UP minus noisy rules; mypy `warn_unused_ignores=false` because platform ignores are unused on the other OS; `jarvis.osal.windows.*` relaxed for ctypes attrs). Never executed here; expect first-run findings and fix forward.

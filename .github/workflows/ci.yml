@@ -1,0 +1,99 @@
+# STATUS: written, NEVER EXECUTED by the author (no GitHub runner / PyPI access was available). Every job here is
+# NOT VERIFIED until a green run exists. The first run may report ruff/mypy/import-linter findings: fix forward,
+# do not weaken the checks. Windows is VERIFIED only by a green windows-latest job, nothing else.
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: static (ruff, mypy, import-linter) - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]   # mypy sees different sys.platform branches on each OS
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip, cache-dependency-path: pyproject.toml }
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: mypy src
+      - run: lint-imports
+
+  test:
+    name: test - ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    env:
+      CI: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}", cache: pip, cache-dependency-path: pyproject.toml }
+      - run: python -m pip install -e .
+      - name: Full test suite (writes build/test-report-<platform>.json; fails on any unexplained skip)
+        run: python -m tests.run
+        env:
+          JARVIS_TEST_REPORT: build/test-report-${{ runner.os }}-py${{ matrix.python }}.json
+      - name: Doctor
+        if: always()
+        run: python -m jarvis --doctor
+      - name: Self-test
+        if: always()
+        run: python -m jarvis --self-test
+      - name: Daemon / IPC smoke (jarvisd + CLI over the OS-native IPC)
+        if: always()
+        shell: bash
+        run: |
+          set -eu
+          H="$RUNNER_TEMP/jh"
+          python -m jarvis.daemon --home "$H" > "$RUNNER_TEMP/jarvisd.log" 2>&1 &
+          DPID=$!
+          trap 'kill $DPID 2>/dev/null || true; cat "$RUNNER_TEMP/jarvisd.log" || true' EXIT
+          up=0
+          for i in $(seq 1 60); do
+            if python -m jarvis --home "$H" daemon status; then up=1; break; fi
+            sleep 0.5
+          done
+          [ "$up" = 1 ] || { echo "daemon never became reachable"; exit 1; }
+          python -m jarvis --home "$H" ask "what is my hostname"
+          python -m jarvis --home "$H" ask "get my IP using the terminal"
+          python -m jarvis --home "$H" audit verify
+          python -m jarvis --home "$H" daemon stop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-report-${{ runner.os }}-py${{ matrix.python }}
+          path: build/test-report-*.json
+          if-no-files-found: error
+
+  compat-matrix:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - uses: actions/download-artifact@v4
+        with: { pattern: "test-report-*-py3.13", path: build, merge-multiple: true }
+      - run: python -m tests.compat_matrix
+      - run: cat docs/compat-matrix.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with: { name: compat-matrix, path: docs/compat-matrix.md }

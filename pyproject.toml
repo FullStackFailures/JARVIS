@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis-agent"
+version = "0.1.0"
+description = "JARVIS - cross-platform (Windows/Linux) autonomous AI computer agent. Milestone 1: kernel."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "jsonschema>=4.20",
+    "psutil>=5.9",
+    "platformdirs>=4.0",
+]
+
+[project.optional-dependencies]
+# Milestone 1 needs no Windows-only third-party packages (ctypes/winreg only).
+windows = []
+linux = []
+keyring = ["keyring>=24"]
+dev = [ "ruff>=0.5", "mypy>=1.10", "import-linter>=2.0"]
+
+[project.scripts]
+jarvis = "jarvis.cli.main:main"
+jarvisd = "jarvis.daemon.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Pragmatic, non-strict set. NEVER RUN in the authoring environment (PyPI blocked): the first CI run may report
+# findings; fix them forward rather than widening the ignores.
+select = ["E", "F", "B", "UP"]
+ignore = ["E501", "B008", "E701", "E702", "E731", "UP035", "UP037"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011", "B017", "B018", "B023", "B904", "E402", "F401", "F811"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Platform-specific `# type: ignore[...]` comments are "unused" on the other OS, so this must stay off.
+warn_unused_ignores = false
+check_untyped_defs = true
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["jarvis.osal.windows.*"]
+# ctypes.WinDLL / _winapi / msvcrt attributes do not exist in typeshed when checking on Linux.
+disable_error_code = ["attr-defined", "name-defined", "unused-ignore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,41 @@
+# NOT EXECUTED in the authoring environment (PyPI blocked). The AST test tests/unit/test_architecture_rules.py is the
+# verified gate; this file lets CI cross-check it with import-linter. If the two ever disagree, fix the disagreement.
+[importlinter]
+root_package = jarvis
+
+[importlinter:contract:osal-and-common-are-leaves]
+name = osal and common import no other jarvis layers
+type = forbidden
+source_modules =
+    jarvis.osal
+    jarvis.common
+forbidden_modules =
+    jarvis.brain
+    jarvis.models
+    jarvis.policy
+    jarvis.tools
+    jarvis.registry
+    jarvis.core
+    jarvis.cli
+    jarvis.daemon
+    jarvis.ipc
+
+[importlinter:contract:tools-never-reach-brain]
+name = tools never import brain, models, cli or daemon
+type = forbidden
+source_modules =
+    jarvis.tools
+forbidden_modules =
+    jarvis.brain
+    jarvis.models
+    jarvis.cli
+    jarvis.daemon
+
+[importlinter:contract:policy-imports-no-models]
+name = policy is independent of model backends and the brain
+type = forbidden
+source_modules =
+    jarvis.policy
+forbidden_modules =
+    jarvis.models
+    jarvis.brain
